@@ -1,0 +1,29 @@
+{
+  "name": "gitflow",
+  "version": "1.0.0",
+  "description": "自动检测 Vite React/Vue TypeScript 项目架构，交互式生成 GitHub Actions 部署工作流 与 sitemap 生成脚本",
+  "type": "module",
+  "bin": {
+    "gitflow": "./bin/cli.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/"
+  ],
+  "keywords": [
+    "github-actions",
+    "ci-cd",
+    "tencent-cos",
+    "sitemap",
+    "vite",
+    "react",
+    "vue",
+    "typescript",
+    "deploy",
+    "cli"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
