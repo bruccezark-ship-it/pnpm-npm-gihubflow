@@ -1,4 +1,41 @@
 /**
+ * 生成 workflow 中解析站点 URL 的 shell 片段
+ * 优先级: 1. gitflow 用户输入  2. SITE_URL secret  3. www.仓库名.com
+ */
+function buildSiteUrlShell(cfg, { exportEnv = false } = {}) {
+  const userDomain = (cfg.domain || '').replace(/"/g, '\\"');
+  const protocol = cfg.protocol || 'https';
+  const envExport = exportEnv
+    ? '\n          echo "SITE_DISPLAY_URL=${FULL_URL}" >> "$GITHUB_ENV"'
+    : '';
+
+  return `
+          # 域名优先级: 1. gitflow 用户输入  2. SITE_URL secret  3. www.仓库名.com
+          USER_DOMAIN="${userDomain}"
+          PROTOCOL="${protocol}"
+
+          if [ -n "$USER_DOMAIN" ]; then
+            if [[ "$USER_DOMAIN" =~ ^https?:// ]]; then
+              FULL_URL="$USER_DOMAIN"
+            else
+              FULL_URL="\${PROTOCOL}://\${USER_DOMAIN}"
+            fi
+            echo "🌐 Using user-configured site URL: \${FULL_URL}"
+          elif [ -n "\${SITE_URL}" ]; then
+            if [[ "\${SITE_URL}" =~ ^https?:// ]]; then
+              FULL_URL="\${SITE_URL}"
+            else
+              FULL_URL="\${PROTOCOL}://\${SITE_URL}"
+            fi
+            echo "🌐 Using SITE_URL secret: \${FULL_URL}"
+          else
+            REPO_NAME="\${{ github.event.repository.name }}"
+            FULL_URL="\${PROTOCOL}://www.\${REPO_NAME}.com"
+            echo "🌐 Using repository name fallback: \${FULL_URL}"
+          fi${envExport}`;
+}
+
+/**
  * 生成 .github/workflows/deploy-cos.yml 内容
  * @param {object} cfg - 用户配置 (来自 prompts)
  */
@@ -138,19 +175,7 @@ ${resolveStep}${pnpmSetupSteps}${nodeSetupSteps}
       - name: Generate sitemap and robots.txt${sitemapWd}
         env:
           SITE_URL: \${{ secrets.SITE_URL }}
-        run: |
-          if [ -z "\${SITE_URL}" ]; then
-            echo "⚠️  WARNING: SITE_URL is not set, skipping sitemap generation"
-            exit 0
-          fi
-
-          if [[ "\${SITE_URL}" =~ ^https?:// ]]; then
-            FULL_URL="\${SITE_URL}"
-          else
-            FULL_URL="${cfg.protocol}://\${SITE_URL}"
-          fi
-
-          echo "🌐 Using site URL: \${FULL_URL}"
+        run: |${buildSiteUrlShell(cfg, { exportEnv: true })}
 
           FULL_URL="\${FULL_URL}" OUTPUT_DIR="${distDir}" node ${sitemapScript}
 
@@ -194,16 +219,10 @@ ${resolveStep}${pnpmSetupSteps}${nodeSetupSteps}
           echo "✅ Deployment completed!"
           echo "📦 Files uploaded from ${uploadDist}/ to COS path: \${{ secrets.COS_TARGET_PATH || 'Default' }}"
           echo "🗑️  Old files not present in the new build have been deleted"
-          if [ -n "\${{ secrets.SITE_URL }}" ]; then
-            SITE_URL="\${{ secrets.SITE_URL }}"
-            if [[ "\${SITE_URL}" =~ ^https?:// ]]; then
-              DISPLAY_URL="\${SITE_URL}"
-            else
-              DISPLAY_URL="${cfg.protocol}://\${SITE_URL}"
-            fi
-            echo "🌐 Site URL: \${DISPLAY_URL}"
-            echo "📄 Sitemap: \${DISPLAY_URL}/sitemap.xml"
-            echo "🤖 Robots: \${DISPLAY_URL}/robots.txt"
+          if [ -n "\${{ env.SITE_DISPLAY_URL }}" ]; then
+            echo "🌐 Site URL: \${{ env.SITE_DISPLAY_URL }}"
+            echo "📄 Sitemap: \${{ env.SITE_DISPLAY_URL }}/sitemap.xml"
+            echo "🤖 Robots: \${{ env.SITE_DISPLAY_URL }}/robots.txt"
           fi
 `;
 }

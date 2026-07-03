@@ -76,7 +76,11 @@ console.log('📋 接下来需要在 GitHub 仓库设置以下 Secrets:');
 console.log('');
 console.log('   Secret           说明');
 console.log('   ───────────────  ──────────────────────────');
-console.log(`   SITE_URL          ${cfg.domain}（将自动使用 ${cfg.protocol}:// 协议）`);
+if (cfg.domain) {
+  console.log(`   SITE_URL          （可选）未在 gitflow 中配置域名时使用；当前已配置: ${cfg.protocol}://${cfg.domain}`);
+} else {
+  console.log('   SITE_URL          （可选）站点域名，未配置时使用 www.仓库名.com');
+}
 console.log('   COS_SECRET_ID     腾讯云 SecretId');
 console.log('   COS_SECRET_KEY    腾讯云 SecretKey');
 console.log('   COS_BUCKET        腾讯云 COS 存储桶名称');

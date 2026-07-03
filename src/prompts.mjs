@@ -62,13 +62,8 @@ export async function promptUser(detected) {
   // 2. 部署分支
   const branch = await ask(rl, '? 部署分支 (master): ') || 'master';
 
-  // 3. 站点域名
-  const domain = await ask(rl, '? 站点域名（不含协议，如 www.example.com）: ');
-  if (!domain) {
-    console.error('✗ 域名不能为空');
-    rl.close();
-    process.exit(1);
-  }
+  // 3. 站点域名（可选，留空则 CI 使用 SITE_URL secret 或仓库名回退）
+  const domain = await ask(rl, '? 站点域名（不含协议，如 www.example.com，留空则跳过）: ');
 
   // 3b. 协议选择
   const protocolInput = await ask(rl, '? 协议 http 或 https (https): ');

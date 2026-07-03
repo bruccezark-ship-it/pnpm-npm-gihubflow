@@ -100,13 +100,21 @@ gitflow
 - 支持 React Router (`export const routes`) 与 Vue Router (`routes: [...]`) 两种写法
 - 自动排除通配路由（`*`、`/*`、带 `:` 的动态路由）
 
+### 站点域名优先级
+
+sitemap / robots.txt 中的域名按以下顺序解析：
+
+1. **gitflow 交互输入的域名**（写入 workflow，优先级最高）
+2. **GitHub Secret `SITE_URL`**（用户未输入域名时使用）
+3. **`www.仓库名.com`**（以上均未配置时的回退，仓库名来自 `github.event.repository.name`）
+
 ## GitHub Secrets 配置
 
 部署前需在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加：
 
 | Secret | 说明 |
 |--------|------|
-| `SITE_URL` | 站点域名，如 `www.example.com` |
+| `SITE_URL` | （可选）站点域名；已在 gitflow 中配置域名时可省略 |
 | `COS_SECRET_ID` | 腾讯云 SecretId |
 | `COS_SECRET_KEY` | 腾讯云 SecretKey |
 | `COS_BUCKET` | COS 存储桶名称 |
