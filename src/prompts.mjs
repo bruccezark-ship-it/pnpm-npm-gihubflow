@@ -9,6 +9,12 @@ function ask(rl, question) {
   });
 }
 
+function resolvePackageManager(input, detected, isMonorepo) {
+  const allowed = isMonorepo ? ['npm', 'pnpm'] : ['npm', 'pnpm', 'yarn'];
+  const normalized = input.toLowerCase();
+  return allowed.includes(normalized) ? normalized : detected;
+}
+
 /**
  * 交互式询问用户配置
  * @param {import('./detect.mjs').DetectResult} detected
@@ -24,15 +30,17 @@ export async function promptUser(detected) {
   console.log(`   打包器:     ${detected.bundler}`);
   console.log(`   语言:       ${detected.language}`);
   console.log(`   路由候选:   ${detected.routeCandidates.join(', ') || '(未找到)'}`);
+  console.log(`   项目目录:   ${detected.projectDirName}`);
+  console.log(`   默认域名:   ${detected.defaultDomain}`);
   if (isMonorepo) {
     console.log(`   Monorepo:   pnpm workspace`);
     console.log(`   根目录:     ${detected.workspaceRoot}`);
     console.log(`   子项目:     ${detected.subprojectPath}`);
     console.log(`   包名:       ${detected.packageName || '(未设置)'}`);
-    console.log(`   子项目 PM:  ${detected.subprojectPackageManager}`);
-  } else {
-    console.log(`   包管理器:   ${detected.subprojectPackageManager}`);
   }
+  console.log(`   包管理器:   ${detected.subprojectPackageManager} @ ${detected.packageManagerVersions[detected.subprojectPackageManager]}`);
+  console.log(`   Node.js:    ${detected.nodeVersion}`);
+  console.log(`   Python:     ${detected.pythonVersion}`);
   console.log('');
 
   console.log('📝 请配置部署工作流:\n');
@@ -62,37 +70,43 @@ export async function promptUser(detected) {
   // 2. 部署分支
   const branch = await ask(rl, '? 部署分支 (master): ') || 'master';
 
-  // 3. 站点域名（可选，留空则 CI 使用 SITE_URL secret 或仓库名回退）
-  const domain = await ask(rl, '? 站点域名（不含协议，如 www.example.com，留空则跳过）: ');
+  // 3. 站点域名（默认 www.项目目录名.com）
+  const domainInput = await ask(
+    rl,
+    `? 站点域名（不含协议） (${detected.defaultDomain}): `,
+  );
+  const domain = domainInput || detected.defaultDomain;
 
   // 3b. 协议选择
   const protocolInput = await ask(rl, '? 协议 http 或 https (https): ');
   const protocol = (protocolInput.toLowerCase() === 'http') ? 'http' : 'https';
 
-  // 4. Node 版本
-  const nodeVersion = await ask(rl, '? Node.js 版本 (24): ') || '24';
+  // 4. Node 版本（自动检测项目配置）
+  const nodeVersion = await ask(rl, `? Node.js 版本 (${detected.nodeVersion}): `) || detected.nodeVersion;
 
-  // 5. Python 版本（coscmd 需要）
-  const pythonVersion = await ask(rl, '? Python 版本 (3.11): ') || '3.11';
+  // 5. Python 版本（coscmd 需要，自动检测项目配置）
+  const pythonVersion = await ask(rl, `? Python 版本 (${detected.pythonVersion}): `) || detected.pythonVersion;
 
-  // 6. 安装/构建命令
+  // 6. 包管理器（自动检测，用户输入可覆盖）
   let installCmd;
   let buildCmd;
   let installWorkingDirectory = '';
   let buildWorkingDirectory = '';
-  let pnpmVersion = '9';
+  let pnpmVersion = detected.packageManagerVersions.pnpm;
+  let npmVersion = detected.packageManagerVersions.npm;
+  let yarnVersion = detected.packageManagerVersions.yarn;
   let subprojectPackageManager = detected.subprojectPackageManager;
 
-  if (isMonorepo) {
-    const pmInput = await ask(
-      rl,
-      `? 子项目包管理器 npm/pnpm (${detected.subprojectPackageManager}): `,
-    );
-    subprojectPackageManager = (pmInput === 'npm' || pmInput === 'pnpm')
-      ? pmInput
-      : detected.subprojectPackageManager;
+  const pmPrompt = isMonorepo
+    ? `? 子项目包管理器 npm/pnpm (${detected.subprojectPackageManager}): `
+    : `? 包管理器 npm/pnpm/yarn (${detected.subprojectPackageManager}): `;
+  const pmInput = await ask(rl, pmPrompt);
+  subprojectPackageManager = resolvePackageManager(pmInput, detected.subprojectPackageManager, isMonorepo);
 
+  if (isMonorepo) {
     if (subprojectPackageManager === 'npm') {
+      const defaultNpm = detected.packageManagerVersions.npm;
+      npmVersion = await ask(rl, `? npm 版本 (${defaultNpm}): `) || defaultNpm;
       installCmd = 'npm ci';
       installWorkingDirectory = detected.subprojectPath;
       buildCmd = 'npm run build';
@@ -103,7 +117,8 @@ export async function promptUser(detected) {
       const buildInput = await ask(rl, '? 构建命令 (npm run build): ');
       if (buildInput) buildCmd = buildInput;
     } else {
-      pnpmVersion = await ask(rl, '? pnpm 版本 (9): ') || '9';
+      const defaultPnpm = detected.packageManagerVersions.pnpm;
+      pnpmVersion = await ask(rl, `? pnpm 版本 (${defaultPnpm}): `) || defaultPnpm;
       installCmd = 'pnpm install --frozen-lockfile';
 
       const filterTarget = detected.packageName
@@ -120,15 +135,22 @@ export async function promptUser(detected) {
       }
     }
   } else if (subprojectPackageManager === 'pnpm') {
-    pnpmVersion = await ask(rl, '? pnpm 版本 (9): ') || '9';
+    const defaultPnpm = detected.packageManagerVersions.pnpm;
+    pnpmVersion = await ask(rl, `? pnpm 版本 (${defaultPnpm}): `) || defaultPnpm;
     installCmd = 'pnpm install --frozen-lockfile';
     buildCmd = await ask(rl, '? 构建命令 (pnpm run build): ') || 'pnpm run build';
   } else if (subprojectPackageManager === 'yarn') {
+    const defaultYarn = detected.packageManagerVersions.yarn;
+    yarnVersion = await ask(rl, `? yarn 版本 (${defaultYarn}): `) || defaultYarn;
     installCmd = 'yarn install --frozen-lockfile';
     buildCmd = await ask(rl, '? 构建命令 (yarn build): ') || 'yarn build';
   } else {
-    installCmd = 'npm ci';
+    const defaultNpm = detected.packageManagerVersions.npm;
+    npmVersion = await ask(rl, `? npm 版本 (${defaultNpm}): `) || defaultNpm;
+    installCmd = detected.hasPackageLock ? 'npm ci' : 'npm install';
     buildCmd = await ask(rl, '? 构建命令 (npm run build): ') || 'npm run build';
+    const installInput = await ask(rl, `? 安装命令 (${installCmd}): `);
+    if (installInput) installCmd = installInput;
   }
 
   rl.close();
@@ -144,6 +166,8 @@ export async function promptUser(detected) {
     nodeVersion,
     pythonVersion,
     pnpmVersion,
+    npmVersion,
+    yarnVersion,
     installCmd,
     buildCmd,
     installWorkingDirectory,

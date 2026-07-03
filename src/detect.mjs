@@ -7,7 +7,7 @@
  */
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { resolve, relative } from 'node:path';
+import { resolve, relative, basename } from 'node:path';
 
 /**
  * @param {string} projectRoot - 当前 Vite 子项目目录绝对路径
@@ -29,10 +29,19 @@ export function detect(projectRoot) {
   const workspace = detectPnpmWorkspace(projectRoot, pkg);
   const subprojectPackageManager = detectPackageManager(projectRoot);
   const hasPackageLock = existsSync(resolve(projectRoot, 'package-lock.json'));
+  const nodeVersion = detectNodeVersion(projectRoot, workspace.workspaceRoot, pkg);
+  const pythonVersion = detectPythonVersion(projectRoot, workspace.workspaceRoot);
+  const projectDirName = basename(projectRoot);
+  const defaultDomain = `www.${projectDirName}.com`;
+  const packageManagerVersions = detectPackageManagerVersions(
+    projectRoot, workspace.workspaceRoot, pkg,
+  );
 
   return {
     framework, bundler, language, routeCandidates, projectRoot,
     subprojectPackageManager, hasPackageLock,
+    nodeVersion, pythonVersion, projectDirName, defaultDomain,
+    packageManagerVersions,
     ...workspace,
   };
 }
@@ -104,6 +113,234 @@ function detectPackageManager(projectDir) {
   }
 
   return 'pnpm';
+}
+
+/** 解析 packageManager 字段，如 "pnpm@10.33.4" */
+function parsePackageManagerField(field) {
+  if (!field || typeof field !== 'string') return null;
+  const m = field.trim().match(/^(pnpm|npm|yarn)@(.+)$/);
+  return m ? { name: m[1], version: m[2] } : null;
+}
+
+/** 从 pnpm-lock.yaml 的 lockfileVersion 推断 pnpm 主版本 */
+function detectPnpmVersionFromLockfile(lockPath) {
+  const content = readTextFile(lockPath);
+  if (!content) return null;
+  const m = content.match(/^lockfileVersion:\s*['"]?(\d+(?:\.\d+)?)/m);
+  if (!m) return null;
+  const major = parseInt(m[1], 10);
+  if (major >= 9) return '9';
+  if (major >= 6) return '8';
+  return '7';
+}
+
+/** 从 package-lock.json 推断 npm 版本 */
+function detectNpmVersionFromLockfile(lockPath) {
+  const content = readTextFile(lockPath);
+  if (!content) return null;
+  try {
+    const lock = JSON.parse(content);
+    if (lock.npm && typeof lock.npm === 'string') {
+      return lock.npm.replace(/^npm@/, '');
+    }
+    const lv = lock.lockfileVersion;
+    if (typeof lv === 'number') {
+      if (lv >= 3) return '10';
+      if (lv === 2) return '8';
+      return '6';
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+/** 从已有 workflow 读取 pnpm / npm / yarn 版本 */
+function detectPmVersionFromWorkflows(root, pm) {
+  const wfDir = resolve(root, '.github', 'workflows');
+  if (!existsSync(wfDir)) return null;
+
+  const patterns = {
+    pnpm: /pnpm\/action-setup@v[\d.]+\s*\n\s*with:\s*\n\s*version:\s*['"]?([^\s'"]+)/,
+    npm: /npm install -g npm@([^\s'"]+)|corepack prepare npm@([^\s'"]+)/,
+    yarn: /corepack prepare yarn@([^\s'"]+)/,
+  };
+  const pattern = patterns[pm];
+  if (!pattern) return null;
+
+  try {
+    for (const f of readdirSync(wfDir)) {
+      if (!f.endsWith('.yml') && !f.endsWith('.yaml')) continue;
+      const content = readFileSync(resolve(wfDir, f), 'utf-8');
+      const m = content.match(pattern);
+      if (m) return m[1] || m[2] || null;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+/**
+ * 检测各包管理器版本
+ * 优先级: packageManager 字段 → volta → lockfile → 已有 workflow → 默认值
+ */
+function detectPackageManagerVersions(projectRoot, workspaceRoot, pkg) {
+  const defaults = { pnpm: '9', npm: '10', yarn: '4' };
+  const result = { ...defaults };
+
+  for (const pm of ['pnpm', 'npm', 'yarn']) {
+    result[pm] = detectSinglePackageManagerVersion(
+      projectRoot, workspaceRoot, pkg, pm, defaults[pm],
+    );
+  }
+  return result;
+}
+
+function detectSinglePackageManagerVersion(projectRoot, workspaceRoot, pkg, pm, fallback) {
+  const dirs = [projectRoot];
+  if (workspaceRoot && workspaceRoot !== projectRoot) dirs.push(workspaceRoot);
+
+  for (const dir of dirs) {
+    const dirPkg = dir === projectRoot ? pkg : readPkgJson(dir);
+
+    const fromField = parsePackageManagerField(dirPkg?.packageManager);
+    if (fromField?.name === pm) return fromField.version;
+
+    if (dirPkg?.volta?.[pm]) return dirPkg.volta[pm];
+  }
+
+  if (pm === 'pnpm') {
+    for (const dir of dirs) {
+      const v = detectPnpmVersionFromLockfile(resolve(dir, 'pnpm-lock.yaml'));
+      if (v) return v;
+    }
+  }
+
+  if (pm === 'npm') {
+    for (const dir of dirs) {
+      const v = detectNpmVersionFromLockfile(resolve(dir, 'package-lock.json'));
+      if (v) return v;
+    }
+  }
+
+  for (const dir of dirs) {
+    const fromWf = detectPmVersionFromWorkflows(dir, pm);
+    if (fromWf) return fromWf;
+  }
+
+  return fallback;
+}
+
+function readTextFile(path) {
+  if (!existsSync(path)) return null;
+  try { return readFileSync(path, 'utf-8').trim(); } catch { return null; }
+}
+
+/** 从版本字符串提取 Node 主版本号，如 "20.11.0" → "20" */
+function normalizeNodeVersion(raw) {
+  if (!raw) return null;
+  const cleaned = raw.replace(/^v/i, '').trim();
+  if (/^lts/i.test(cleaned) || cleaned === 'node') return null;
+  const m = cleaned.match(/(\d+)/);
+  return m ? m[1] : null;
+}
+
+/** 从版本字符串提取 Python 版本，如 "3.11.5" → "3.11" */
+function normalizePythonVersion(raw) {
+  if (!raw) return null;
+  const m = raw.trim().match(/(\d+\.\d+)/);
+  return m ? m[1] : null;
+}
+
+/** 从已有 workflow 文件中读取 node-version / python-version */
+function detectFromWorkflows(root, field) {
+  const wfDir = resolve(root, '.github', 'workflows');
+  if (!existsSync(wfDir)) return null;
+
+  const pattern = field === 'node'
+    ? /node-version:\s*['"]?(\d+)/
+    : /python-version:\s*['"]?(\d+\.\d+)/;
+
+  try {
+    for (const f of readdirSync(wfDir)) {
+      if (!f.endsWith('.yml') && !f.endsWith('.yaml')) continue;
+      const content = readFileSync(resolve(wfDir, f), 'utf-8');
+      const m = content.match(pattern);
+      if (m) return m[1];
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function readPkgJson(dir) {
+  const p = resolve(dir, 'package.json');
+  if (!existsSync(p)) return null;
+  try { return JSON.parse(readFileSync(p, 'utf-8')); } catch { return null; }
+}
+
+/**
+ * 检测 Node.js 版本
+ * 优先级: .nvmrc / .node-version → volta.node → engines.node → 已有 workflow → 默认 24
+ */
+function detectNodeVersion(projectRoot, workspaceRoot, pkg) {
+  const dirs = [projectRoot];
+  if (workspaceRoot && workspaceRoot !== projectRoot) dirs.push(workspaceRoot);
+
+  for (const dir of dirs) {
+    for (const file of ['.nvmrc', '.node-version']) {
+      const v = normalizeNodeVersion(readTextFile(resolve(dir, file)));
+      if (v) return v;
+    }
+
+    const dirPkg = dir === projectRoot ? pkg : readPkgJson(dir);
+    if (dirPkg?.volta?.node) {
+      const v = normalizeNodeVersion(dirPkg.volta.node);
+      if (v) return v;
+    }
+    if (dirPkg?.engines?.node) {
+      const v = normalizeNodeVersion(dirPkg.engines.node);
+      if (v) return v;
+    }
+
+    const fromWf = detectFromWorkflows(dir, 'node');
+    if (fromWf) return fromWf;
+  }
+
+  return '24';
+}
+
+/**
+ * 检测 Python 版本（coscmd 用）
+ * 优先级: .python-version → runtime.txt → .tool-versions → 已有 workflow → 默认 3.11
+ */
+function detectPythonVersion(projectRoot, workspaceRoot) {
+  const dirs = [projectRoot];
+  if (workspaceRoot && workspaceRoot !== projectRoot) dirs.push(workspaceRoot);
+
+  for (const dir of dirs) {
+    const pyVersion = readTextFile(resolve(dir, '.python-version'));
+    if (pyVersion) {
+      const v = normalizePythonVersion(pyVersion);
+      if (v) return v;
+    }
+
+    const runtime = readTextFile(resolve(dir, 'runtime.txt'));
+    if (runtime) {
+      const v = normalizePythonVersion(runtime.replace(/^python-?/i, ''));
+      if (v) return v;
+    }
+
+    const toolVersions = readTextFile(resolve(dir, '.tool-versions'));
+    if (toolVersions) {
+      const m = toolVersions.match(/^python\s+(\S+)/m);
+      if (m) {
+        const v = normalizePythonVersion(m[1]);
+        if (v) return v;
+      }
+    }
+
+    const fromWf = detectFromWorkflows(dir, 'python');
+    if (fromWf) return fromWf;
+  }
+
+  return '3.11';
 }
 
 function detectFramework(deps) {

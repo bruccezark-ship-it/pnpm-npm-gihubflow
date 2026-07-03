@@ -48,6 +48,10 @@ export function generateWorkflowYaml(cfg) {
   const needsNpm = cfg.subprojectPackageManager === 'npm'
     || cfg.installCmd.startsWith('npm');
 
+  const needsYarn = cfg.subprojectPackageManager === 'yarn'
+    || cfg.installCmd.startsWith('yarn')
+    || cfg.buildCmd.startsWith('yarn');
+
   // monorepo 子项目路径；CI 仓库可能是完整 monorepo，也可能仅包含子项目本身
   const hasSubprojectPath = Boolean(cfg.subprojectPath);
 
@@ -90,6 +94,18 @@ export function generateWorkflowYaml(cfg) {
           version: '${cfg.pnpmVersion || '9'}'
 ` : '';
 
+  const yarnSetupSteps = needsYarn ? `
+      - name: Setup Yarn
+        run: |
+          corepack enable
+          corepack prepare yarn@${cfg.yarnVersion || '4'} --activate
+` : '';
+
+  const npmSetupSteps = needsNpm ? `
+      - name: Setup npm
+        run: npm install -g npm@${cfg.npmVersion || '10'}
+` : '';
+
   const npmCachePath = hasSubprojectPath
     ? '${{ steps.project.outputs.lockfile }}'
     : 'package-lock.json';
@@ -122,6 +138,12 @@ export function generateWorkflowYaml(cfg) {
         with:
           node-version: '${cfg.nodeVersion}'
           cache: 'pnpm'
+` : needsYarn ? `
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '${cfg.nodeVersion}'
+          cache: 'yarn'
 ` : `
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -158,7 +180,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-${resolveStep}${pnpmSetupSteps}${nodeSetupSteps}
+${resolveStep}${pnpmSetupSteps}${yarnSetupSteps}${nodeSetupSteps}${npmSetupSteps}
       - name: Debug - list root files
         run: |
           echo "=== Root directory ==="

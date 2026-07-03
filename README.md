@@ -43,8 +43,20 @@ gitflow
 
 工作流根据子项目包管理器分两种模式：
 
-- **npm 子项目**：若缺少 `package-lock.json`，CI 会先根据 `package.json` 自动生成，再启用 npm 缓存并执行 `npm ci`；自动识别仓库是完整 monorepo 还是仅含子项目本身，避免 `apps/xxx` 路径不存在
+- **npm 子项目**：若缺少 `package-lock.json`，CI 会先根据 `package.json` 自动生成，再启用 npm 缓存并执行 `npm ci`；通过 `npm install -g npm@版本` 安装指定 npm 版本（检测不到时默认 `10`）
 - **pnpm 子项目**：在 workspace 根目录 `pnpm install --frozen-lockfile`，通过 `pnpm --filter` 构建
+
+### 包管理器版本检测
+
+各包管理器版本自动检测来源（检测不到时使用默认值）：
+
+| 包管理器 | 检测来源 | 默认值 |
+|----------|----------|--------|
+| pnpm | `packageManager` → `volta` → `pnpm-lock.yaml` → 已有 workflow | `9` |
+| npm | `packageManager` → `volta` → `package-lock.json` → 已有 workflow | `10` |
+| yarn | `packageManager` → `volta` → 已有 workflow | `4` |
+
+交互时显示检测值作为默认，用户输入可覆盖。
 
 ## 交互流程
 
@@ -59,19 +71,22 @@ gitflow
    打包器:     Vite
    语言:       TypeScript
    路由候选:   src/routes.tsx
+   项目目录:   tdccp
+   默认域名:   www.tdccp.com
+   包管理器:   pnpm @ 10.33.4
+   Node.js:    20
+   Python:     3.11
 
 📝 请配置部署工作流:
 
 ? 路由文件路径 (src/routes.tsx):
 ? 部署分支 (master):
-? 站点域名（不含协议）: www.example.com
-? Node.js 版本 (24):
+? 站点域名（不含协议） (www.tdccp.com):
+? Node.js 版本 (20):
 ? Python 版本 (3.11):
-? pnpm 版本 (9):                    # workspace 根目录安装依赖
-? 子项目包管理器 npm/pnpm (npm):    # 自动检测，可手动选择
-? 构建命令 (npm run build):         # npm 子项目默认
-# 或
-? 构建命令 (pnpm --filter @app/web build):  # pnpm 子项目默认
+? 包管理器 npm/pnpm/yarn (npm):      # 自动检测，回车采用默认值
+? npm 版本 (10.2.0):                 # 自动检测，检测不到默认 10
+? 构建命令 (npm run build):
 
 ✅ 文件生成完毕:
    📄 .github/workflows/deploy-cos.yml
@@ -104,9 +119,9 @@ gitflow
 
 sitemap / robots.txt 中的域名按以下顺序解析：
 
-1. **gitflow 交互输入的域名**（写入 workflow，优先级最高）
-2. **GitHub Secret `SITE_URL`**（用户未输入域名时使用）
-3. **`www.仓库名.com`**（以上均未配置时的回退，仓库名来自 `github.event.repository.name`）
+1. **gitflow 交互输入的域名**（默认 `www.项目目录名.com`，写入 workflow，优先级最高）
+2. **GitHub Secret `SITE_URL`**（用户在 gitflow 中修改域名时使用）
+3. **`www.仓库名.com`**（以上均未配置时的 CI 回退，仓库名来自 `github.event.repository.name`）
 
 ## GitHub Secrets 配置
 
@@ -127,7 +142,7 @@ sitemap / robots.txt 中的域名按以下顺序解析：
 gitflow/
 ├── bin/cli.mjs                       # CLI 入口
 ├── src/
-│   ├── detect.mjs                    # 自动检测框架/打包器/语言/路由
+│   ├── detect.mjs                    # 自动检测框架/打包器/语言/路由/运行时版本
 │   ├── prompts.mjs                   # 交互式问答（零依赖 readline）
 │   ├── generate-workflow.mjs         # 生成 deploy-cos.yml
 │   └── generate-sitemap-script.mjs   # 生成 scripts/generate-sitemap.mjs

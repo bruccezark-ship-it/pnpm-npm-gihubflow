@@ -77,7 +77,7 @@ console.log('');
 console.log('   Secret           说明');
 console.log('   ───────────────  ──────────────────────────');
 if (cfg.domain) {
-  console.log(`   SITE_URL          （可选）未在 gitflow 中配置域名时使用；当前已配置: ${cfg.protocol}://${cfg.domain}`);
+  console.log(`   SITE_URL          （可选）CI 回退域名；当前 gitflow 已配置: ${cfg.protocol}://${cfg.domain}`);
 } else {
   console.log('   SITE_URL          （可选）站点域名，未配置时使用 www.仓库名.com');
 }
