@@ -110,7 +110,7 @@ sitemap / robots.txt 中的域名按以下顺序解析：
 
 ## GitHub Secrets 配置
 
-部署前需在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加：
+部署前需在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加以下内容：
 
 | Secret | 说明 |
 |--------|------|
