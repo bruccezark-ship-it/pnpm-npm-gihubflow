@@ -157,6 +157,7 @@ export async function promptUser(detected) {
 
   const distDir = './dist';
   const sitemapScript = 'scripts/generate-sitemap.mjs';
+  const htmlMdScript = 'scripts/generate-html-md.mjs';
 
   return {
     routesFile,
@@ -182,5 +183,6 @@ export async function promptUser(detected) {
     hasPackageLock: detected.hasPackageLock,
     distDir,
     sitemapScript,
+    htmlMdScript,
   };
 }

@@ -105,7 +105,7 @@ gitflow
 3. 在 workspace 根目录安装依赖（`pnpm install --frozen-lockfile`）
 4. 通过 `pnpm --filter` 构建目标 Vite 子项目
 5. 调用子项目的 `scripts/generate-sitemap.mjs` 生成 sitemap.xml 与 robots.txt
-6. 安装 coscmd 并上传至腾讯云 COS
+6. 安装 coscmd 并**增量同步**至腾讯云 COS（MD5 diff 跳过未变更文件，删除远程多余文件）
 
 ### `scripts/generate-sitemap.mjs`
 
@@ -134,7 +134,22 @@ sitemap / robots.txt 中的域名按以下顺序解析：
 | `COS_SECRET_KEY` | 腾讯云 SecretKey |
 | `COS_BUCKET` | COS 存储桶名称 |
 | `COS_REGION` | COS 地域，如 `ap-guangzhou` |
-| `COS_TARGET_PATH` | （可选）上传路径，默认 `/Default/` |
+| `COS_TARGET_PATH` | （可选）COS 目标前缀，默认 `Default`（即桶内 `Default/` 目录） |
+
+### COS 增量同步
+
+部署步骤使用 `coscmd upload -rfs --delete`：
+
+| 参数 | 作用 |
+|------|------|
+| `-r` | 递归上传 `dist/` 下所有文件 |
+| `-s` | 增量对比 MD5，跳过内容未变的文件 |
+| `-f` | CI 非交互模式，跳过确认 |
+| `--delete` | 删除 COS 目标目录中、本地 `dist/` 已不存在的多余文件 |
+
+同步前会列出远程对象，同步后输出远程文件快照，便于在 Actions 日志中核对。
+
+> 首次部署或远程文件非 coscmd 上传时，增量跳过可能不生效；完成一次同步后，后续部署会按 MD5 增量上传。
 
 ## 技术架构
 

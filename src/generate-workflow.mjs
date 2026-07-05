@@ -41,6 +41,7 @@ function buildSiteUrlShell(cfg, { exportEnv = false } = {}) {
  */
 export function generateWorkflowYaml(cfg) {
   const sitemapScript = cfg.sitemapScript || 'scripts/generate-sitemap.mjs';
+  const htmlMdScript = cfg.htmlMdScript || 'scripts/generate-html-md.mjs';
   const distDir = cfg.distDir || './dist';
   const needsPnpm = cfg.subprojectPackageManager === 'pnpm'
     || cfg.installCmd.startsWith('pnpm')
@@ -164,6 +165,7 @@ export function generateWorkflowYaml(cfg) {
       : '';
 
   const sitemapWd = hasSubprojectPath ? projectWd : '';
+  const htmlMdWd = hasSubprojectPath ? projectWd : '';
 
   return `name: Deploy to Tencent COS
 
@@ -206,13 +208,31 @@ ${resolveStep}${pnpmSetupSteps}${yarnSetupSteps}${nodeSetupSteps}${npmSetupSteps
           echo "📄 robots.txt:"
           cat ${distDir}/robots.txt
 
+      - name: Install Playwright and Chromium browser
+        run: |
+          PW_DIR="\${RUNNER_TEMP}/playwright-ci"
+          mkdir -p "$PW_DIR"
+          cd "$PW_DIR"
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.49.1
+          npx playwright install chromium --with-deps
+          echo "PLAYWRIGHT_MODULE_PATH=$PW_DIR/node_modules/playwright" >> "$GITHUB_ENV"
+
+      - name: Generate markdown for top-level pages${htmlMdWd}
+        run: node ${htmlMdScript}
+        env:
+          PLAYWRIGHT_MODULE_PATH: \${{ env.PLAYWRIGHT_MODULE_PATH }}
+          BASE_URL: http://127.0.0.1:4173
+          OUTPUT_DIR: ${distDir}
+          DIST_DIR: ${distDir}
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '${cfg.pythonVersion}'
 
       - name: Install coscmd
-        run: pip install coscmd
+        run: pip install 'coscmd>=1.8.3.2'
 
       - name: Configure coscmd
         env:
@@ -230,17 +250,45 @@ ${resolveStep}${pnpmSetupSteps}${yarnSetupSteps}${nodeSetupSteps}${npmSetupSteps
           coscmd config -a "\${COS_SECRET_ID}" -s "\${COS_SECRET_KEY}" -b "\${COS_BUCKET}" -r "\${COS_REGION}"
           echo "coscmd config done"
 
-      - name: Upload to COS (incremental + delete old files)
+      - name: Sync to COS (incremental diff + delete orphans)
         env:
           COS_TARGET_PATH: \${{ secrets.COS_TARGET_PATH || 'Default' }}
         run: |
-          coscmd upload -r ${uploadDist}/ "\${COS_TARGET_PATH}" --delete --force
+          set -euo pipefail
+
+          LOCAL_DIR="${uploadDist}"
+          TARGET="\${COS_TARGET_PATH#/}"
+          TARGET="\${TARGET%/}/"
+
+          echo "📂 Local directory:  \${LOCAL_DIR}/"
+          echo "☁️  COS prefix:       \${TARGET}"
+
+          if [ ! -d "\${LOCAL_DIR}" ]; then
+            echo "::error::Build output not found: \${LOCAL_DIR}"
+            exit 1
+          fi
+
+          LOCAL_COUNT=\$(find "\${LOCAL_DIR}" -type f | wc -l | tr -d ' ')
+          echo "📊 Local file count: \${LOCAL_COUNT}"
+
+          echo "📋 Remote objects before sync (first 30):"
+          coscmd list -r "\${TARGET}" 2>/dev/null | head -30 || echo "  (empty or first deploy)"
+
+          echo ""
+          echo "🔄 Incremental sync: upload changed files, skip identical (MD5), delete remote orphans..."
+          # -r 递归  -s 增量对比 MD5  -f 跳过确认  --delete 删除远程多余文件
+          coscmd upload -rfs --delete "\${LOCAL_DIR}/" "\${TARGET}"
+
+          echo ""
+          echo "✅ Sync completed"
+          echo "📋 Remote objects after sync (last 20):"
+          coscmd list -r "\${TARGET}" 2>/dev/null | tail -20 || true
 
       - name: Summary
         run: |
           echo "✅ Deployment completed!"
-          echo "📦 Files uploaded from ${uploadDist}/ to COS path: \${{ secrets.COS_TARGET_PATH || 'Default' }}"
-          echo "🗑️  Old files not present in the new build have been deleted"
+          echo "📦 Synced ${uploadDist}/ → COS: \${{ secrets.COS_TARGET_PATH || 'Default' }}/"
+          echo "🔄 Incremental upload (MD5 diff) + remote orphan cleanup enabled"
           if [ -n "\${{ env.SITE_DISPLAY_URL }}" ]; then
             echo "🌐 Site URL: \${{ env.SITE_DISPLAY_URL }}"
             echo "📄 Sitemap: \${{ env.SITE_DISPLAY_URL }}/sitemap.xml"

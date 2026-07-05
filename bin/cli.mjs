@@ -18,6 +18,7 @@ import { detect } from '../src/detect.mjs';
 import { promptUser } from '../src/prompts.mjs';
 import { generateWorkflowYaml } from '../src/generate-workflow.mjs';
 import { generateSitemapScript } from '../src/generate-sitemap-script.mjs';
+import { generateHtmlMdScript } from '../src/generate-html-md-script.mjs';
 
 const cwd = process.cwd();
 
@@ -66,11 +67,17 @@ const sitemapScriptPath = resolve(scriptsDir, 'generate-sitemap.mjs');
 const sitemapScript     = generateSitemapScript(cfg);
 writeFileSync(sitemapScriptPath, sitemapScript, 'utf-8');
 
+// 3c. 一级页面 Markdown 抓取脚本
+const htmlMdScriptPath = resolve(scriptsDir, 'generate-html-md.mjs');
+const htmlMdScript     = generateHtmlMdScript(cfg);
+writeFileSync(htmlMdScriptPath, htmlMdScript, 'utf-8');
+
 // ──────────── 4. 输出结果 ────────────
 console.log('');
 console.log('✅ 文件生成完毕:');
 console.log(`   📄 .github/workflows/deploy-cos.yml`);
 console.log(`   📄 scripts/generate-sitemap.mjs`);
+console.log(`   📄 scripts/generate-html-md.mjs`);
 console.log('');
 console.log('📋 接下来需要在 GitHub 仓库设置以下 Secrets:');
 console.log('');
